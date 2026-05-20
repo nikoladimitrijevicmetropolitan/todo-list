@@ -9,7 +9,7 @@ React + Spring Boot Todo aplikacija sa H2 fajl bazom.
 - Oznacava zadatke kao zavrsene ili aktivne.
 - Brise zadatke.
 - Filtrira prikaz na `Svi`, `Aktivni` i `Zavrseni`.
-- Cita pocetne seed podatke iz backend fajla `src/main/resources/seed-todos.csv`.
+- Cita pocetne seed podatke iz backend fajla `backend/todo-backend/src/main/resources/seed-todos.csv`.
 
 ## Pokretanje
 
