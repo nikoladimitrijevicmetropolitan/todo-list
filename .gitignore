@@ -1,0 +1,4 @@
+.m2/
+.npm-cache/
+.tmp/
+backend/todo-backend/data/
