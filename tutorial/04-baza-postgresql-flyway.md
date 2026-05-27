@@ -1,107 +1,195 @@
-# 04 - PostgreSQL i Flyway
+# 04 - PostgreSQL i Flyway (Prošireno izdanje)
 
 ## Cilj lekcije
 
-Cilj je da studenti razumeju zasto aplikacija treba da predje sa H2 baze na PostgreSQL i zasto Flyway migracije treba da postanu izvor istine za strukturu baze. Lekcija povezuje bazu, testove, Docker i CI u jednu celinu.
+Cilj ove lekcije je da studenti u potpunosti razumeju teorijske i praktične korake prelaska sa in-memory/file **H2 baze podataka** na robusnu **PostgreSQL** relacionu bazu u Spring Boot backend aplikaciji. 
+
+Takođe, lekcija detaljno obrađuje korišćenje **Flyway** alata za verzionisane SQL migracije baze podataka, čime se obezbeđuje ponovljivost i gašenje nesigurnog automatskog ažuriranja šeme (`ddl-auto=update`).
 
 Na kraju lekcije student treba da ume da objasni:
 
-- razliku izmedju razvojne i produkcijske baze;
-- zasto H2 nije dovoljan za dugorocan razvoj;
-- sta je migracija baze;
-- kako Flyway zna koje migracije su izvrsene;
-- zasto seed podaci treba da budu jasno kontrolisani;
-- kako Spring profili pomazu da ista aplikacija radi u vise okruzenja.
+- Razliku između H2 (razvojne/in-memory) i PostgreSQL (produkcijske) baze podataka.
+- Zašto automatsko ažuriranje šeme (`spring.jpa.hibernate.ddl-auto=update`) predstavlja rizik u produkciji i kako Flyway to rešava.
+- Šta su to verzionisane SQL migracije i kako se pišu (`V1`, `V2`, itd.).
+- Kako Flyway prati istoriju izvršenih migracija kroz tabelu `flyway_schema_history`.
+- Kako **Spring Profili** omogućavaju aplikaciji da radi u različitim okruženjima (lokalni PostgreSQL, lokalni H2 fallback, test okruženje) bez promene Java koda.
+- Kako se pokreće lokalna PostgreSQL baza u sekundi koristeći **Docker**.
 
-## Teorijsko objasnjenje
+---
 
-H2 je zgodan za brz lokalni pocetak. Lagan je, ne zahteva poseban server i dobro se uklapa u male demonstracije. Medjutim, H2 nije isto sto i PostgreSQL. Kada projekat raste, razlike izmedju baza mogu da naprave greske koje se pojave tek kasno.
+## Zašto prelazimo sa H2 na PostgreSQL?
 
-PostgreSQL je realniji izbor za aplikaciju koja cuva podatke. On se koristi kao poseban servis, ima stabilan SQL dijalekat, podrzava napredne tipove i blizi je produkcijskom okruzenju. Ako planiramo Docker, CI i Testcontainers, PostgreSQL postaje prirodan centralni deo infrastrukture.
+H2 baza je izuzetno praktična za brzi početak rada. Pokreće se in-memory ili piše u običan lokalni fajl unutar projekta, što znači da ne zahteva nikakav eksterni server. Međutim, H2 ima ozbiljna ograničenja:
 
-Flyway uvodi verzionisane SQL migracije. Umesto da Hibernate sam menja semu kroz `ddl-auto=update`, tim eksplicitno zapisuje kako se baza menja. Svaka migracija ima redni broj i opis, na primer `V1__create_todos_table.sql`. Kada aplikacija startuje, Flyway proverava koje migracije su vec izvrsene i primenjuje nove.
+1.  **Dijalektne razlike:** SQL dijalekat H2 baze se razlikuje od PostgreSQL-a. Određene funkcije, tipovi podataka (npr. UUID, JSONB) i načini upravljanja transakcijama ili sekvencama rade drugačije. Ako razvijate aplikaciju na H2 bazi, a na produkciji koristite PostgreSQL, rizikujete da se greške pojave tek u produkciji.
+2.  **Skladištenje i performanse:** H2 nije projektovan za rad sa velikom količinom podataka niti za višekorisnički konkurentni rad.
+3.  **Kontejnerizacija:** Da bismo lokalno okruženje i CI/CD pipeline učinili identičnim produkciji, PostgreSQL postaje prirodan centralni deo naše infrastrukture (pomoću Docker Compose i Testcontainers-a).
 
-Ovakav pristup omogucava ponovljivost. Lokalna baza, CI baza i buduca produkcijska baza mogu da dobiju istu strukturu kroz iste fajlove. Ako migracije nisu deo koda, znanje o bazi ostaje rasuto po glavama ljudi ili u rucnim instrukcijama. To je rizik.
+---
 
 ## Problem sa `ddl-auto=update`
 
-`spring.jpa.hibernate.ddl-auto=update` je zgodan u pocetku jer Hibernate automatski prilagodjava semu. Ali dugorocno ima nekoliko problema:
+U ranoj fazi razvoja koristimo `spring.jpa.hibernate.ddl-auto=update` kako bi Hibernate sam menjao tabele u bazi na osnovu naših Java entiteta. U profesionalnom softverskom inženjerstvu to je neprihvatljivo iz nekoliko razloga:
 
-- promene baze nisu jasno dokumentovane;
-- nije uvek ocigledno sta se desilo izmedju dve verzije aplikacije;
-- tesko je reprodukovati isto stanje u drugom okruzenju;
-- brisanje ili kompleksne promene kolona mogu biti rizicne;
-- tim nema eksplicitnu istoriju odluka o bazi.
+- **Database Drift:** Baza se tiho menja bez ikakve istorije i dokumentacije o tome kada je i zašto neka kolona dodata ili izmenjena.
+- **Rizik od gubitka podataka:** Hibernate može pogrešno interpretirati promenu i obrisati kolonu ili tabelu kako bi je ponovo kreirao.
+- **Nemogućnost reprodukcije:** Teško je postaviti novu bazu na isto stanje u novom okruženju (npr. na CI serveru ili kod novog člana tima).
 
-Flyway resava ovaj problem tako sto promene baze postaju fajlovi u repozitorijumu.
+---
 
-## Spring profili
+## Flyway kao "Git" za vašu bazu podataka
 
-Spring profil je nacin da ista aplikacija koristi razlicitu konfiguraciju u razlicitom okruzenju.
+Flyway uvodi **verzionisane SQL migracije**. Sve izmene nad bazom se pišu u obliku standardnih `.sql` fajlova i čuvaju u Git repozitorijumu. 
 
-Za Todo aplikaciju planirani profili su:
+### Nazivi fajlova
+Flyway prepoznaje skripte po tačno definisanom šablonu naziva:
+`V<VERZIJA>__<OPIS>.sql` (obrati pažnju: koriste se **dva donja podvučnika**).
+Primeri:
+*   `V1__create_todo_table.sql`
+*   `V2__seed_todos.sql`
 
-- `local-h2`: privremeni fallback za brz lokalni demo;
-- `local-postgres`: glavni lokalni razvojni profil;
-- `test`: profil za Testcontainers PostgreSQL;
-- kasnije `prod`: produkcijska konfiguracija preko environment varijabli.
+### Kako Flyway radi
+Kada se Spring Boot aplikacija pokrene, Flyway:
+1.  U bazi traži specijalnu tabelu `flyway_schema_history`. Ako ona ne postoji, Flyway je sam kreira.
+2.  Skenira folder `src/main/resources/db/migration/` u projektu i traži SQL skripte.
+3.  U tabeli `flyway_schema_history` proverava koje skripte su već izvršene na osnovu njihove verzije i kontrolne sume (checksum).
+4.  Izvršava samo **nove** skripte po redu i upisuje ih u istoriju.
+5.  Ako je neka stara skripta naknadno promenjena u kodu, Flyway će prijaviti grešku jer se kontrolna suma ne poklapa. **Izvršene migracije se nikada ne menjaju naknadno!** Umesto toga, uvek se piše nova migracija (npr. `V3`).
 
-Profil ne treba da menja poslovnu logiku. On treba da menja konfiguraciju: URL baze, username, password, Flyway ponasanje i eventualno seed strategiju.
+---
 
-## Seed podaci
+## Kompletan Plan Tranzicije na PostgreSQL
 
-Seed podaci su pocetni podaci koji pomazu da aplikacija ima smislen prikaz odmah nakon starta. U trenutnoj aplikaciji seed podaci dolaze iz CSV fajla i ucitavaju se runtime loaderom. To je dobro za pocetni demo, ali kada uvedemo Flyway, treba jasnije odvojiti:
+U nastavku je detaljno dokumentovan plan konfigurisanja i struktura fajlova koju student treba da implementira u backend aplikaciji.
 
-- strukturne migracije, koje uvek postoje;
-- razvojne seed podatke, koji ne moraju u produkciju;
-- test podatke, koje testovi treba sami da pripreme.
+### Korak 1: Izmena `pom.xml` (Zavisnosti)
+Student mora u `pom.xml` dodati drajver za PostgreSQL bazu i Flyway zavisnosti:
 
-Jedna opcija je da `V1__create_todos_table.sql` kreira tabelu, a `V2__seed_todos.sql` doda razvojne podatke. Druga opcija je da seed migracija bude ukljucena samo u dev profilu. Vazno je da studenti razumeju da seed nije isto sto i poslovni podaci korisnika.
+```xml
+<!-- PostgreSQL Driver -->
+<dependency>
+	<groupId>org.postgresql</groupId>
+	<artifactId>postgresql</artifactId>
+	<scope>runtime</scope>
+</dependency>
 
-## Veza sa Todo aplikacijom
+<!-- Flyway Migration Support -->
+<dependency>
+	<groupId>org.flywaydb</groupId>
+	<artifactId>flyway-core</artifactId>
+</dependency>
+<dependency>
+	<groupId>org.flywaydb</groupId>
+	<artifactId>flyway-database-postgresql</artifactId>
+</dependency>
+```
 
-Trenutno Todo backend koristi H2 fajl bazu i runtime CSV seed loader. U sledecoj fazi treba planirati:
+---
 
-- PostgreSQL kao glavni lokalni i CI izbor;
-- Flyway migraciju za tabelu `todo`;
-- seed migraciju za razvojne podatke ili odvojenu dev seed strategiju;
-- Spring profile `local-h2`, `local-postgres` i `test`;
-- smanjenje oslanjanja na `spring.jpa.hibernate.ddl-auto=update`.
+### Korak 2: Kreiranje Flyway Migracionih Skripti
+Kreirati folder resursa: `src/main/resources/db/migration/` i u njemu napraviti sledeća dva SQL fajla:
 
-Minimalna prva migracija treba da opise kolone koje vec postoje: `id`, `title`, `completed`, `created_at`, `updated_at`.
+#### `V1__create_todo_table.sql` (Kreiranje šeme)
+```sql
+CREATE TABLE todo (
+    id BIGSERIAL PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    completed BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+```
 
-## Tipicne greske
+#### `V2__seed_todos.sql` (Inicijalni podaci za razvoj)
+```sql
+INSERT INTO todo (title, completed, created_at, updated_at) VALUES 
+('Pregledati danasnje zadatke', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+('Dodati prvi pravi zadatak', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+('Isprobati filtere', true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+```
 
-- Migracije se pisu tek na kraju, kada je baza vec "rucno sredjena".
-- Seed podaci se mesaju sa produkcijskim podacima.
-- Testovi koriste H2, a aplikacija se deploy-uje na PostgreSQL.
-- Vise okruzenja ima razlicitu semu baze.
-- Stare migracije se menjaju umesto da se doda nova migracija.
+---
 
-## Pojmovi za pamcenje
+### Korak 3: Podela na Spring Profile (Konfiguracija)
+Konfiguraciju delimo na zasebne profile kako bismo podržali lokalni razvoj na PostgreSQL-u, lak fallback na H2 ako programer nema lokalni PostgreSQL i izolaciju u testovima.
 
-- PostgreSQL;
-- H2;
-- Flyway;
-- migracija baze;
-- schema history;
-- Spring profile;
-- seed podaci;
-- reproduktivnost baze;
-- `ddl-auto`;
-- database drift.
+#### 1. Glavni konfiguracioni fajl (`application.properties`)
+Sadrži zajedničke parametre i postavlja podrazumevani profil:
+```properties
+spring.application.name=todo-backend
+# Podrazumevano aktiviramo lokalni PostgreSQL profil pri pokretanju
+spring.profiles.active=local-postgres
+```
 
-## Prakticna vezba
+#### 2. Profil za PostgreSQL (`application-local-postgres.properties`)
+```properties
+spring.datasource.url=jdbc:postgresql://localhost:5432/todos
+spring.datasource.username=postgres
+spring.datasource.password=postgres
+spring.datasource.driver-class-name=org.postgresql.Driver
 
-Nacrtaj kako bi izgledao prelaz sa H2 na PostgreSQL u tri koraka: priprema migracija, promena konfiguracije, provera kroz Testcontainers. Za svaki korak napisi koji fajlovi bi se kasnije menjali.
+# Flyway vrsi migracije, a Hibernate samo potvrdjuje strukturu
+spring.flyway.enabled=true
+spring.jpa.hibernate.ddl-auto=validate
+```
 
-Zatim napisi sta bi bila prva Flyway migracija za Todo aplikaciju i koje kolone mora da sadrzi.
+#### 3. Fallback profil za H2 bazu (`application-local-h2.properties`)
+```properties
+spring.datasource.url=jdbc:h2:file:./data/todos
+spring.datasource.username=sa
+spring.datasource.password=
+spring.datasource.driver-class-name=org.h2.Driver
+
+# H2 takodje moze koristiti Flyway za izvrsavanje migracija
+spring.flyway.enabled=true
+spring.jpa.hibernate.ddl-auto=validate
+```
+
+---
+
+### Korak 4: Pokretanje lokalne PostgreSQL baze u Docker-u
+Student može u sekundi podići čistu i izolovanu PostgreSQL bazu na svom računaru pokretanjem sledeće Docker komande u terminalu:
+
+```bash
+docker run --name local-postgres -e POSTGRES_DB=todos -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -d postgres:16
+```
+
+---
+
+### Korak 5: Pokretanje i verifikacija rada
+Nakon što se baza podigne, student pokreće Spring Boot aplikaciju iz komandne linije aktiviranjem željenog profila:
+
+#### Pokretanje sa PostgreSQL profilom (Podrazumevano):
+```powershell
+.\mvnw.cmd spring-boot:run
+# Ili eksplicitno:
+.\mvnw.cmd spring-boot:run -Dspring.profiles.active=local-postgres
+```
+*   **Šta pratiti u logovima:** Aplikacija će detektovati Flyway, skenirati migracije i ispisati:
+    `Successfully applied 2 migrations to schema "public"`.
+*   **Provera tabele:** Otvaranjem pgAdmin-a ili konzole videće se tabele `todo` i `flyway_schema_history` sa tačno evidentiranim kontrolnim sumama i statusima migracija.
+
+#### Pokretanje sa H2 Fallback profilom:
+```powershell
+.\mvnw.cmd spring-boot:run -Dspring.profiles.active=local-h2
+```
+*   Aplikacija se povezuje na lokalni H2 fajl, kreira tabelu `flyway_schema_history` u H2 i izvršava migracije na isti način, dokazujući potpunu fleksibilnost konfiguracije.
+
+---
+
+## Tipične greške kod migracija baze
+
+- **Izmena starih migracionih fajlova:** Promena fajla koji je već uspešno izvršen na bazi dovodi do `checksum` greške i blokiranja aplikacije pri sledećem startu. Uvek kreirati novu verziju (npr. `V3`).
+- **Mešanje DDL i DML skripti:** Pisanje šeme (DDL - npr. `CREATE TABLE`) i upisivanje podataka (DML - npr. `INSERT`) u istom koraku može dovesti do grešaka ako baza ne podržava transakcioni DDL. Dobra praksa je razdvajanje na zasebne fajlove (poput našeg `V1` i `V2`).
+- **Nepodudaranje SQL dijalekta:** Korišćenje H2 specifične sintakse u Flyway skriptama koja nije podržana u PostgreSQL-u (ili obrnuto). Uvek pisati standardni ANSI SQL.
+
+---
 
 ## Pitanja za proveru znanja
 
-1. Zasto `ddl-auto=update` nije dobar dugorocni izvor istine?
-2. Sta znaci da je migracija baze verzionisana?
-3. Zasto seed podaci treba da budu jasno odvojeni od produkcijskih migracija?
-4. Koja je uloga Spring profila kod prelaska na PostgreSQL?
-5. Zasto testovi sa PostgreSQL imaju vecu vrednost od testova sa H2 kada je PostgreSQL ciljna baza?
-6. Zasto stare Flyway migracije ne treba menjati kada su vec izvrsene?
+1.  Zasto `ddl-auto=update` nije dobar dugorocni izvor istine i kako Flyway to rešava?
+2.  Objasni značenje formata naziva Flyway skripte `V1__create_todo_table.sql`. Zašto su važna dva donja podvučnika?
+3.  Šta predstavlja tabela `flyway_schema_history` i na koji način Flyway detektuje da je neka skripta naknadno izmenjena u kodu?
+4.  Kako Spring profili omogućavaju aplikaciji da radi sa potpuno različitim bazama bez potrebe za recompilacijom ili izmenom Java klasa?
+5.  Zbog čega se preporučuje razdvajanje strukturnih migracija (DDL) od inicijalnih razvojnih podataka (seed / DML)?
+6.  Kako korišćenje pravog PostgreSQL-a kroz Docker lokalno štiti projekat od regresionih grešaka u odnosu na rad sa H2 bazom?
