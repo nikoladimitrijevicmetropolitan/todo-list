@@ -234,3 +234,138 @@ button:disabled {
     flex: 1 1 120px;
   }
 }
+
+.todo-item-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.todo-list li .btn-detail {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: inherit;
+  font-weight: 700;
+  color: var(--accent);
+  background: transparent;
+  transition:
+    background 0.2s,
+    border-color 0.2s,
+    color 0.2s;
+}
+
+.todo-list li .btn-detail:hover {
+  color: #ffffff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.todo-list li .btn-delete {
+  color: var(--danger);
+  background: transparent;
+  border-color: var(--border);
+}
+
+.todo-list li .btn-delete:hover {
+  color: #ffffff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.todo-details-panel {
+  margin-top: 24px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.todo-details-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.todo-details-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.todo-details-header button {
+  color: var(--muted);
+  background: transparent;
+  border-color: var(--border);
+  font-weight: 500;
+  padding: 6px 12px;
+}
+
+.todo-details-header button:hover {
+  color: var(--text);
+  background: var(--border);
+}
+
+.todo-details-content {
+  padding: 18px;
+  display: grid;
+  gap: 16px;
+}
+
+.todo-details-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  align-items: baseline;
+}
+
+.todo-details-label {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.todo-details-value {
+  font-weight: 500;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.todo-details-value.badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  width: fit-content;
+}
+
+.todo-details-value.badge.completed {
+  color: #15803d;
+  background: #dcfce7;
+  border: 1px solid #bbf7d0;
+}
+
+.todo-details-value.badge.active {
+  color: #1d4ed8;
+  background: #dbeafe;
+  border: 1px solid #bfdbfe;
+}

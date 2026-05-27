@@ -30,6 +30,11 @@ public class TodoController {
 		return todoRepository.findAllByOrderByCreatedAtDesc();
 	}
 
+	@GetMapping("/{id}")
+	public Todo getTodoById(@PathVariable Long id) {
+		return findTodo(id);
+	}
+
 	@PostMapping
 	@ResponseStatus(HttpStatus.CREATED)
 	public Todo createTodo(@RequestBody TodoCreateRequest request) {
