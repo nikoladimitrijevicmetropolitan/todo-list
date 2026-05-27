@@ -154,6 +154,21 @@ Student može u sekundi podići čistu i izolovanu PostgreSQL bazu na svom raču
 docker run --name local-postgres -e POSTGRES_DB=todos -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -d postgres:16
 ```
 
+#### Alternativa: Pokretanje na lokalnoj Windows instalaciji (bez Docker-a)
+
+Ukoliko student ne koristi Docker već ima direktno instaliran PostgreSQL na Windows 11 operativnom sistemu, koraci za inicijalizaciju su sledeći:
+
+1. **Kreiranje baze `todos`**:
+   Pre prvog pokretanja aplikacije, neophodno je ručno kreirati praznu bazu pod nazivom `todos`. To se može uraditi na dva načina:
+   - **Kroz pgAdmin**: Otvoriti pgAdmin grafički interfejs, kliknuti desnim klikom na `Databases` -> `Create` -> `Database...`, uneti naziv `todos` i kliknuti na `Save`.
+   - **Kroz psql (Command Line)**: Izvršiti sledeću komandu u terminalu zamenom putanje do vašeg instalacionog foldera (podrazumevano je `C:\Program Files\PostgreSQL\<verzija>\bin` ili u vašem slučaju `D:\PostgreSQL\bin`):
+     ```powershell
+     $env:PGPASSWORD='postgres'; & "D:\PostgreSQL\bin\psql.exe" -U postgres -h localhost -c "CREATE DATABASE todos;"
+     ```
+
+2. **Konfiguracija kredencijala**:
+   Uveriti se da se korisničko ime i lozinka unutar `application-local-postgres.properties` poklapaju sa onima koje je student definisao prilikom same instalacije PostgreSQL-a na Windows-u.
+
 ---
 
 ### Korak 5: Pokretanje i verifikacija rada
