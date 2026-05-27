@@ -56,6 +56,7 @@ Frontend:
 cd D:\vibe\todo-list\frontend
 $env:npm_config_cache='D:\vibe\todo-list\.npm-cache'
 npm run lint
+npm run test
 npm run build
 ```
 

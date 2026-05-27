@@ -1,111 +1,268 @@
-# 03 - Backend testiranje
+# 03 - Backend testiranje (Prošireno izdanje)
 
 ## Cilj lekcije
 
-Cilj je da studenti razumeju backend test slojeve u Spring Boot aplikaciji: unit, repository, controller/API i integracione testove. Poseban fokus je na tome zasto Testcontainers PostgreSQL bolje priprema projekat za buducu produkcijsku bazu nego H2.
+Cilj ove lekcije je da studenti u potpunosti razumeju slojeve testiranja na backendu u Spring Boot aplikaciji: unit (jedinične), repository (sloj baze podataka), controller/API (HTTP ugovorni sloj) i integracione testove. 
+
+Poseban fokus je na tome kako da studenti analiziraju i implementiraju prve četiri ključne faze testiranja lokalno i u in-memory H2 okruženju, ostavljajući petu fazu (integracione testove sa Testcontainers PostgreSQL) za kasniju migraciju na PostgreSQL bazu.
 
 Na kraju lekcije student treba da ume da objasni:
 
-- sta proverava `contextLoads`, a sta ne proverava;
-- zasto se HTTP ugovor testira posebno;
-- kako se proverava validacija ulaznih podataka;
-- zasto baza u testu treba da lici na realnu bazu;
-- gde se uklapa Testcontainers.
+- Šta proverava i obezbeđuje osnovni `contextLoads` smoke test.
+- Kako se pišu brzi jedinični (unit) testovi za izolovanu validaciju bez podizanja Spring konteksta.
+- Zašto se upiti i mapiranje baze testiraju izolovano kroz `@DataJpaTest`.
+- Kako `MockMvc` omogućava testiranje HTTP ugovora REST API-ja (status kodovi, JSON formati, CORS, validacija).
+- Kako izolovati testove i osigurati transakcioni rollback kako podaci ne bi ostajali u bazi.
 
-## Teorijsko objasnjenje
+---
 
-Backend testiranje proverava poslovna pravila, HTTP ugovor, rad sa bazom i konfiguraciju aplikacije. Jedan `contextLoads` test je dobar kao smoke test, ali nije dovoljan za poverenje u funkcionalnost. On govori da Spring kontekst moze da se podigne, ali ne govori da endpointi vracaju ispravne statuse, da validacija radi ili da repository cuva podatke kako ocekujemo.
+## Teorijsko objašnjenje i test slojevi
 
-Unit test proverava logiku bez Spring konteksta. Takav test je brz i precizan. Ako imamo servis koji normalizuje naslov zadatka ili parsira seed podatke, to je dobar kandidat za unit test.
+Testiranje backenda se bazira na proveri ispravnosti ugovora koje aplikacija nudi (API), njene poslovne logike i bezbednosti skladištenja podataka. Projekat delimo na jasno definisane slojeve testova:
 
-Repository test proverava mapiranje entiteta i upite ka bazi. On odgovara na pitanje: da li JPA entitet stvarno odgovara tabeli i da li upit vraca podatke u ocekivanom redosledu?
+### Faza 1: Smoke Test (`contextLoads`)
+Spring Boot nam po difoltu generiše smoke test klasu. Ovaj test ne proverava pojedinačne funkcionalnosti niti API rute. Njegova jedina uloga je da se uveri da se celokupan **Spring ApplicationContext** može uspešno podići. Ako zaboravite `@Autowired` anotaciju, napravite cirkularnu zavisnost ili pogrešno konfigurišete `application.properties`, ovaj test će odmah pasti (npr. bacanjem `BeanCreationException`).
 
-Controller ili API test proverava HTTP sloj. Tu nas zanimaju status kodovi, JSON oblik, validacija i greske. API test treba da tretira backend kao ugovor: klijent salje zahtev i dobija odgovor.
+### Faza 2: Jedinični (Unit) Testovi
+Najbrži nivo testiranja. Ovi testovi uopšte ne učitavaju Spring kontekst niti komuniciraju sa bazom podataka. Koriste se za proveru čistih logičkih funkcija i metoda (npr. provera da li prosleđivanje praznog ili `null` stringa u formi za kreiranje zadataka ispravno baca BadRequest grešku). Zavisnosti se, ukoliko postoje, ručno mock-uju preko Mockito framework-a.
 
-Integracioni test proverava vise slojeva zajedno. U ozbiljnijem projektu to znaci da backend koristi stvarnu bazu ili bazu koja veoma lici na produkcijsku. Zato se uvodi Testcontainers PostgreSQL.
+### Faza 3: Repository Testovi (`@DataJpaTest`)
+Repository sloj je zadužen za interakciju sa relacionom bazom preko Hibernate-a i Spring Data JPA.
+*   **Kako rade:** Koristi se anotacija `@DataJpaTest` koja učitava samo entitete i repository interfejse (znatno brže od podizanja cele aplikacije).
+*   **Baza podataka:** Podrazumevano se koristi privremena in-memory **H2 baza**. Svaki test se izvršava unutar zasebne transakcije i automatski vrši **rollback** nakon završetka testa. Time se osigurava da baze ostane čista za naredne provere.
 
-## Zasto Testcontainers
+### Faza 4: API / Controller Testovi (`@WebMvcTest`)
+Ovaj sloj verifikuje HTTP ugovor koji frontend koristi. Ovde nas ne zanima stvarna baza, već provera rutinga, mapiranja metoda, ispravnosti JSON šema, CORS pravila i validacije ulaza.
+*   **Kako rade:** Koristi se `@WebMvcTest(TodoController.class)` koja učitava samo web sloj.
+*   **Simulacija HTTP poziva:** Pomoću `MockMvc` simulatora šaljemo zahteve (npr. `get()`, `post()`) i vršimo asertacije nad ishodima.
+*   **Izolacija:** Repository se mock-uje upotrebom `@MockBean` anotacije kako testovi ne bi zavisili od baze.
 
-H2 je koristan za brz start, ali moze da sakrije razlike u SQL dijalektu. PostgreSQL ima svoja pravila za tipove, indekse, constraint-e, transakcije i SQL sintaksu. Ako testovi rade samo na H2, moguce je da prodju lokalno, a padnu kada aplikacija predje na PostgreSQL.
+---
 
-Testcontainers pokrece pravi PostgreSQL u container-u tokom testa. Test dobija izolovanu bazu, a kada se zavrsi, container se gasi. To je sporije od H2, ali mnogo vernije buducem runtime-u.
+## Implementirane provere i kodovi u Todo aplikaciji
 
-U CI okruzenju Testcontainers je posebno koristan jer ne zavisimo od rucno instalirane baze. CI job sam podize ono sto mu treba.
+U našoj Todo aplikaciji uspešno smo implementirali prve četiri faze testiranja. U nastavku su prikazani stvarni kodovi testova koje studenti mogu proučavati i koristiti za učenje:
 
-## Veza sa Todo aplikacijom
+### 1. Faza 1: Smoke Test (`TodoBackendApplicationTests.java`)
+```java
+package rs.ac.metropolitan.todo_backend;
 
-Todo backend treba da testira:
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.SpringBootTest;
 
-- `GET /api/todos` vraca listu sortiranu od najnovijeg ka najstarijem;
-- `POST /api/todos` kreira zadatak sa obaveznim `title`;
-- `PATCH /api/todos/{id}` menja `title` i/ili `completed`;
-- `DELETE /api/todos/{id}` brise zadatak;
-- prazan `title` vraca gresku;
-- nepostojeci `id` vraca 404;
-- CORS prihvata `localhost:5173` i `127.0.0.1:5173`;
-- seed podaci postoje samo kada baza treba da ih dobije.
+@SpringBootTest(properties = "spring.datasource.url=jdbc:h2:mem:todo-test;DB_CLOSE_DELAY=-1")
+class TodoBackendApplicationTests {
 
-Trenutni backend ima `Todo`, `TodoRepository`, `TodoController` i `TodoSeedDataLoader`. To daje prirodne tacke za testiranje. Repository testovi proveravaju cuvanje i sortiranje. Controller testovi proveravaju HTTP ponasanje. Seed loader testovi proveravaju da se seed ne dodaje kada baza nije prazna.
+	@Test
+	void contextLoads() {
+		// Osnovna provera uspesnosti podizanja Spring konteksta
+	}
+}
+```
 
-## Predlozeni backend test slojevi
+### 2. Faza 2: Jedinični test validacije (`TodoControllerUnitTest.java`)
+Brzi test bez pokretanja Springa koji direktno proverava odbijanje neispravnog unosa:
+```java
+package rs.ac.metropolitan.todo_backend;
 
-1. Smoke test:
-   - Spring kontekst se podize.
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
+import static org.junit.jupiter.api.Assertions.*;
 
-2. Unit testovi:
-   - validacija praznog naslova;
-   - parsiranje seed fajla ako ta logika ostane u kodu;
-   - mapiranje seed zapisa u `Todo`.
+class TodoControllerUnitTest {
 
-3. Repository testovi:
-   - cuvanje novog zadatka;
-   - sortiranje po `createdAt` opadajuce;
-   - update `completed` vrednosti.
+	private TodoRepository todoRepository;
+	private TodoController todoController;
 
-4. API testovi:
-   - CRUD endpointi;
-   - 400 za neispravan zahtev;
-   - 404 za nepostojeci `id`;
-   - CORS preflight.
+	@BeforeEach
+	void setUp() {
+		todoRepository = Mockito.mock(TodoRepository.class);
+		todoController = new TodoController(todoRepository);
+	}
 
-5. Integracioni testovi:
-   - Spring Boot + PostgreSQL Testcontainers;
-   - Flyway migracije kada budu uvedene;
-   - kompletan backend tok bez frontenda.
+	@Test
+	void createTodo_WithNullTitle_ThrowsBadRequest() {
+		TodoController.TodoCreateRequest request = new TodoController.TodoCreateRequest(null);
+		ResponseStatusException exception = assertThrows(ResponseStatusException.class, () -> {
+			todoController.createTodo(request);
+		});
+		assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
+		assertEquals("Naziv zadatka je obavezan.", exception.getReason());
+	}
 
-## Tipicne greske kod backend testova
+	@Test
+	void createTodo_WithBlankTitle_ThrowsBadRequest() {
+		TodoController.TodoCreateRequest request = new TodoController.TodoCreateRequest("   ");
+		ResponseStatusException exception = assertThrows(ResponseStatusException.class, () -> {
+			todoController.createTodo(request);
+		});
+		assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
+		assertEquals("Naziv zadatka je obavezan.", exception.getReason());
+	}
+}
+```
 
-- Test pokrece ceo Spring kontekst iako mu treba obican unit test.
-- Test proverava samo happy path.
-- Test ne proverava status kod.
-- Test ne proverava negativne slucajeve.
-- Test koristi H2, a tvrdi da proverava PostgreSQL ponasanje.
-- Test podaci ostaju u bazi i uticu na sledeci test.
+### 3. Faza 3: Repository Test (`TodoRepositoryTest.java`)
+Testira ispravnost mapiranja, upisa, izmena i custom sortiranja rezultata na bazi:
+```java
+package rs.ac.metropolitan.todo_backend;
 
-## Pojmovi za pamcenje
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
+import static org.junit.jupiter.api.Assertions.*;
 
-- JUnit;
-- Spring Boot test;
-- repository test;
-- API test;
-- integration test;
-- Testcontainers;
-- HTTP status kod;
-- CORS;
-- test profile;
-- izolovana baza.
+@DataJpaTest
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.ANY)
+class TodoRepositoryTest {
 
-## Prakticna vezba
+	@Autowired
+	private TodoRepository todoRepository;
 
-Napravi matricu backend testova. Redovi su endpointi, a kolone su happy path, validacija, greske i baza. Za svaki endpoint napisi najmanje jedan test koji bi student kasnije implementirao.
+	@Test
+	void saveAndFindAllByOrderByCreatedAtDesc_ReturnsSortedTodos() throws InterruptedException {
+		Todo first = new Todo("Prvi zadatak");
+		todoRepository.save(first);
 
-Zatim oznaci koji testovi treba da rade sa H2, a koji sa Testcontainers PostgreSQL. Objasni zasto.
+		Thread.sleep(10); // Pauza kako bi se osigurali razliciti timestamps
+
+		Todo second = new Todo("Drugi zadatak");
+		todoRepository.save(second);
+
+		List<Todo> sorted = todoRepository.findAllByOrderByCreatedAtDesc();
+
+		assertEquals(2, sorted.size());
+		assertEquals("Drugi zadatak", sorted.get(0).getTitle());
+		assertEquals("Prvi zadatak", sorted.get(1).getTitle());
+	}
+
+	@Test
+	void updateCompletedStatus_PersistsCorrectly() {
+		Todo todo = new Todo("Zadatak za izmenu");
+		Todo saved = todoRepository.save(todo);
+
+		saved.setCompleted(true);
+		Todo updated = todoRepository.save(saved);
+
+		assertTrue(updated.isCompleted());
+	}
+}
+```
+
+### 4. Faza 4: API MockMvc Test (`TodoControllerTest.java`)
+Testira HTTP status kodove, ispravne odgovore i JSON strukturu na MVC sloju:
+```java
+package rs.ac.metropolitan.todo_backend;
+
+import java.util.List;
+import java.util.Optional;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+@WebMvcTest(TodoController.class)
+class TodoControllerTest {
+
+	@Autowired
+	private MockMvc mockMvc;
+
+	@MockBean
+	private TodoRepository todoRepository;
+
+	@Test
+	void listTodos_ReturnsList200Ok() throws Exception {
+		Todo mockTodo = new Todo("Testirati aplikaciju");
+		Mockito.when(todoRepository.findAllByOrderByCreatedAtDesc())
+			.thenReturn(List.of(mockTodo));
+
+		mockMvc.perform(get("/api/todos"))
+			.andExpect(status().isOk())
+			.andExpect(content().contentType(MediaType.APPLICATION_JSON))
+			.andExpect(jsonPath("$[0].title").value("Testirati aplikaciju"));
+	}
+
+	@Test
+	void getTodoById_WithExistingId_ReturnsTodo200Ok() throws Exception {
+		Todo mockTodo = new Todo("Testirati pojedinacno");
+		Mockito.when(todoRepository.findById(1L)).thenReturn(Optional.of(mockTodo));
+
+		mockMvc.perform(get("/api/todos/1"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.title").value("Testirati pojedinacno"));
+	}
+
+	@Test
+	void getTodoById_WithNonExistingId_Returns404NotFound() throws Exception {
+		Mockito.when(todoRepository.findById(999L)).thenReturn(Optional.empty());
+
+		mockMvc.perform(get("/api/todos/999"))
+			.andExpect(status().isNotFound());
+	}
+
+	@Test
+	void createTodo_WithValidTitle_ReturnsCreated201() throws Exception {
+		Todo mockTodo = new Todo("Novi zadatak");
+		Mockito.when(todoRepository.save(any(Todo.class))).thenReturn(mockTodo);
+
+		mockMvc.perform(post("/api/todos")
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{\"title\": \"Novi zadatak\"}"))
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.title").value("Novi zadatak"));
+	}
+
+	@Test
+	void createTodo_WithInvalidTitle_Returns400BadRequest() throws Exception {
+		mockMvc.perform(post("/api/todos")
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{\"title\": \"   \"}"))
+			.andExpect(status().isBadRequest());
+	}
+}
+```
+
+---
+
+## Pokretanje testova na backendu
+
+Pokretanje svih testova iz komandne linije se vrši pomoću Maven wrappera:
+
+```powershell
+# Pozicionirajte se u backend/todo-backend direktorijum i izvrsite:
+.\mvnw.cmd test
+```
+
+Maven će kompajlirati klase, pokrenuti in-memory test bazu i izvršiti sve jedinične, komponentne i repozitorijumske testove dajući detaljan izveštaj o ishodu.
+
+---
+
+## Tipične greške kod testiranja backenda
+
+*   **Pokretanje celog konteksta za unit testove:** Korišćenje `@SpringBootTest` za brze logičke testove, što drastično usporava vreme izvršavanja.
+*   **Neizolovanost podataka:** Zaboravljanje transakcionog karaktera testova baze, pa test podaci iz jednog testa ostanu u bazi i obore sledeći test. `@DataJpaTest` ovo rešava automatskim rollback-om.
+*   **Netestiranje graničnih slučajeva:** Testiranje isključivo uspešnih zahteva (happy path), dok se provere praznog unosa, nepodržanih formata ili nepostojećih ID-jeva izostavljaju.
+*   **Zavisnost od spoljnih servisa:** Testiranje kontrolera direktno nad bazom umesto korišćenja `@MockBean` u `@WebMvcTest`-u.
+
+---
 
 ## Pitanja za proveru znanja
 
-1. Zasto `contextLoads` nije dovoljan test za backend?
-2. Koja je razlika izmedju controller testa i integracionog testa?
-3. Zasto Testcontainers PostgreSQL bolje odgovara buducem stanju aplikacije od H2?
-4. Koji test treba da proveri 404 za nepostojeci todo?
-5. Sta znaci da API test proverava ugovor?
-6. Zasto negativni testovi imaju istu vrednost kao happy path testovi?
+1.  Koja je primarna uloga `@SpringBootTest` smoke testa i koje greške u konfiguraciji on najbrže hvata?
+2.  Zašto u `@WebMvcTest` testovima koristimo `@MockBean` za repository sloj umesto prave konekcije sa bazom?
+3.  Kako `@DataJpaTest` garantuje da podaci koje upišemo tokom izvršavanja jednog testa neće zagaditi bazu za sledeći test?
+4.  Koja je razlika u brzini i resursima između unit testa i integracionog testa koji koristi pravu bazu (bilo H2 ili PostgreSQL)?
+5.  Zašto je važno pisati negativne testove (npr. provera da li slanje praznog naslova ispravno vraća 400 Bad Request) u API sloju?
+6.  Kako `MockMvc` simulator doprinosi brzini i stabilnosti ugovornih API testova u poređenju sa pravim slanjem HTTP zahteva preko mreže?
