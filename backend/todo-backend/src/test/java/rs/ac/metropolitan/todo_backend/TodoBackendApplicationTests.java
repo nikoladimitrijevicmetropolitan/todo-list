@@ -2,8 +2,10 @@ package rs.ac.metropolitan.todo_backend;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 
-@SpringBootTest(properties = "spring.datasource.url=jdbc:h2:mem:todo-test;DB_CLOSE_DELAY=-1")
+@SpringBootTest
+@ActiveProfiles("test")
 class TodoBackendApplicationTests {
 
 	@Test

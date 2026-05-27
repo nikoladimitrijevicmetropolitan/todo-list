@@ -75,8 +75,8 @@ Student mora u `pom.xml` dodati drajver za PostgreSQL bazu i Flyway zavisnosti:
 
 <!-- Flyway Migration Support -->
 <dependency>
-	<groupId>org.flywaydb</groupId>
-	<artifactId>flyway-core</artifactId>
+	<groupId>org.springframework.boot</groupId>
+	<artifactId>spring-boot-starter-flyway</artifactId>
 </dependency>
 <dependency>
 	<groupId>org.flywaydb</groupId>
