@@ -236,25 +236,29 @@ class TodoControllerTest {
 
 ---
 
-## Pokretanje testova na backendu
+## Pokretanje testova na backendu (Integracija sa PostgreSQL-om)
 
 Pokretanje svih testova iz komandne linije se vrši pomoću Maven wrappera:
 
 ```powershell
-# Pozicionirajte se u backend/todo-backend direktorijum i izvrsite:
+# Pozicionirajte se u backend/todo-backend direktorijum i izvršite:
 .\mvnw.cmd test
 ```
 
-Maven će kompajlirati klase, pokrenuti in-memory test bazu i izvršiti sve jedinične, komponentne i repozitorijumske testove dajući detaljan izveštaj o ishodu.
+### Kako testovi funkcionišu u letu:
+1.  **Profil "test"**: Pozivanjem testova aktivira se `test` profil, koji učitava konfiguraciju iz `application-test.properties`.
+2.  **Prava PostgreSQL baza**: Umesto sporije i dijalektom drugačije H2 in-memory baze, testovi se pokreću nad namenskom lokalnom bazom podataka **`todos_test`** na vašem Windows 11 PostgreSQL serveru.
+3.  **Automatske Flyway migracije**: Flyway se automatski pokreće na bazi `todos_test` pre samih testova, kreira tabelu `todo` i učitava seed podatke.
+4.  **Garancija izolovanosti**: Iako testovi trče nad pravom bazom, ugrađena metoda `@BeforeEach` sa `todoRepository.deleteAll()` u testovima osigurava da se baza u potpunosti očisti pre svakog test scenarija, čime se dobijaju 100% ponovljive i izolovane provere bez mešanja podataka.
 
 ---
 
 ## Tipične greške kod testiranja backenda
 
 *   **Pokretanje celog konteksta za unit testove:** Korišćenje `@SpringBootTest` za brze logičke testove, što drastično usporava vreme izvršavanja.
-*   **Neizolovanost podataka:** Zaboravljanje transakcionog karaktera testova baze, pa test podaci iz jednog testa ostanu u bazi i obore sledeći test. `@DataJpaTest` ovo rešava automatskim rollback-om.
+*   **Neizolovanost podataka:** Zaboravljanje čišćenja baze, pa test podaci iz jednog testa ostanu u bazi i obore asertacije u sledećem testu (čišćenje pomoću `deleteAll()` ili `@Transactional` rešava ovaj problem).
 *   **Netestiranje graničnih slučajeva:** Testiranje isključivo uspešnih zahteva (happy path), dok se provere praznog unosa, nepodržanih formata ili nepostojećih ID-jeva izostavljaju.
-*   **Zavisnost od spoljnih servisa:** Testiranje kontrolera direktno nad bazom umesto korišćenja `@MockBean` u `@WebMvcTest`-u.
+*   **Zavisnost od dijalekta:** Razvoj aplikacije na PostgreSQL bazi, a pokretanje testova na in-memory H2 bazi. Ovo može sakriti greške u SQL sintaksi koje se otkriju tek u produkciji. Pokretanje testova nad realnim PostgreSQL-om (poput `todos_test`) u potpunosti eliminiše ovaj rizik!
 
 ---
 
