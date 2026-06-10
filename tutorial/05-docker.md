@@ -110,6 +110,123 @@ Aplikacija ne sme da ima "zakucane" (hardcoded) adrese baze, lozinke i ključeve
 
 ---
 
+## 6. Praktični Primeri Dockerfile-a u Todo Aplikaciji
+
+U nastavku su stvarni primeri `Dockerfile` konfiguracija iz naše aplikacije koje studenti treba da prouče. Oba primera koriste **Multi-stage build** (gradnju u više koraka) kako bi se dobile minimalne i bezbedne produkcione slike bez alata za razvoj (poput Maven-a ili kompletnog Node.js paketa).
+
+### A. Backend Dockerfile (Spring Boot sa Maven-om)
+Fajl se nalazi na putanji: [backend/todo-backend/Dockerfile](file:///d:/vibe/todo-list/backend/todo-backend/Dockerfile)
+
+```dockerfile
+# Stage 1: Build korak (kompajliranje i pakovanje)
+FROM maven:3.9.6-eclipse-temurin-17 AS build
+WORKDIR /app
+
+# Kopiranje pom.xml i izvornog koda
+COPY pom.xml .
+COPY src ./src
+
+# Kompajliranje i pakovanje JAR fajla (preskačemo testove za brži build)
+RUN mvn clean package -DskipTests
+
+# Stage 2: Runtime korak (pokretanje aplikacije)
+FROM eclipse-temurin:17-jre-alpine
+WORKDIR /app
+
+# Kopiranje isključivo izgrađenog JAR fajla iz prethodnog Stage-a
+COPY --from=build /app/target/todo-backend-0.0.1-SNAPSHOT.jar app.jar
+
+# Izlaganje porta 8080
+EXPOSE 8080
+
+# Pokretanje aplikacije
+ENTRYPOINT ["java", "-jar", "app.jar"]
+```
+
+#### Objašnjenje po linijama:
+- **`FROM maven:3.9.6... AS build`**: Učitavamo privremenu sliku koja ima instaliran Java JDK i Maven kako bismo preveli našu aplikaciju. Imenujemo je kao `build` faza.
+- **`WORKDIR /app`**: Postavljamo radni direktorijum unutar kontejnera na `/app`.
+- **`COPY pom.xml .`** i **`COPY src ./src`**: Kopiramo našu Maven konfiguraciju i Java kod sa host mašine u kontejner.
+- **`RUN mvn clean package -DskipTests`**: Pokrećemo Maven komandu koja pravi izvršnu `.jar` datoteku u `/app/target/` direktorijumu.
+- **`FROM eclipse-temurin:17-jre-alpine`**: Započinjemo novu, izuzetno laganu fazu (`alpine` verzija koja zauzima samo ~50MB i ne sadrži Maven ni JDK, već samo lagani JRE potreban za pokretanje).
+- **`COPY --from=build ...`**: Kopiramo samo finalni `.jar` fajl iz prve faze, dok sve ostale fajlove (izvorni kod, maven keš) ostavljamo iza sebe.
+- **`EXPOSE 8080`**: Dokumentuje da kontejner sluša na portu 8080.
+- **`ENTRYPOINT`**: Definiše podrazumevanu komandu koja se izvršava kada se kontejner pokrene.
+
+---
+
+### B. Frontend Dockerfile (React sa Vite-om i Nginx-om)
+Fajl se nalazi na putanji: [frontend/Dockerfile](file:///d:/vibe/todo-list/frontend/Dockerfile)
+
+```dockerfile
+# Stage 1: Build korak (instalacija i gradnja React koda)
+FROM node:20-alpine AS build
+WORKDIR /app
+
+# Kopiranje konfiguracije paketa i instalacija zavisnosti
+COPY package*.json ./
+RUN npm ci
+
+# Kopiranje ostatka koda i kreiranje dist foldera
+COPY . .
+RUN npm run build
+
+# Stage 2: Runtime korak (Nginx web server)
+FROM nginx:1.25-alpine
+
+# Kopiranje prilagođene Nginx konfiguracije (za react-router ruting)
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Kopiranje statičkih dist fajlova iz build faze u Nginx direktorijum
+COPY --from=build /app/dist /usr/share/nginx/html
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
+```
+
+#### Objašnjenje po linijama:
+- **`FROM node:20-alpine AS build`**: Koristimo Node.js okruženje kako bismo preveli React kod.
+- **`RUN npm ci`**: Brza i deterministička instalacija zavisnosti na osnovu `package-lock.json` fajla.
+- **`RUN npm run build`**: Vite prevodi naš React kod u statičke fajlove (HTML, JS, CSS) koji se smeštaju u `dist` folder.
+- **`FROM nginx:1.25-alpine`**: Započinjemo drugu fazu koristeći popularni **Nginx** web server. Više nam ne treba Node.js jer je naša aplikacija sada samo skup statičkih fajlova.
+- **`COPY nginx.conf ...`**: Kopiramo Nginx konfiguraciju (detalji ispod) kako bi server ispravno upravljao rutiranjem.
+- **`COPY --from=build /app/dist ...`**: Kopiramo statičke fajlove iz prve faze direktno u folder odakle ih Nginx servira klijentima.
+- **`EXPOSE 80`**: Nginx po defaultu sluša na portu 80.
+- **`CMD`**: Pokreće Nginx u "foreground" režimu (kako se kontejner ne bi odmah ugasio).
+
+---
+
+### C. Nginx Konfiguracija (`nginx.conf`)
+Fajl se nalazi na putanji: [frontend/nginx.conf](file:///d:/vibe/todo-list/frontend/nginx.conf)
+
+Da bi naša React aplikacija koja koristi klijentsko rutiranje (React Router) radila ispravno unutar Nginx kontejnera, potreban nam je sledeći fajl:
+
+```nginx
+server {
+    listen 80;
+    server_name localhost;
+
+    location / {
+        root /usr/share/nginx/html;
+        index index.html index.htm;
+        # Ključna linija za React Router:
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Rukovanje greškama na serveru
+    error_page 500 502 503 504 /50x.html;
+    location = /50x.html {
+        root /usr/share/nginx/html;
+    }
+}
+```
+
+> [!TIP]
+> Linija `try_files $uri $uri/ /index.html;` je od suštinske važnosti za Single Page Applications (SPA). Ona govori Nginx-u da za bilo koji URL koji korisnik unese u pretraživač (npr. `/detalji/1`), ukoliko taj fajl fizički ne postoji na serveru, vrati `index.html` i dozvoli React Router-u da preuzme navigaciju na klijentu.
+
+---
+
 ## Pitanja za Proveru Znanja
 
 1.  Objasnite razliku između Docker Image-a i Docker Kontejnera kroz analogiju.
